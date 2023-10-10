@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+
 /*
          STACK CALCULATION & SPOOFING
 */
@@ -192,6 +193,21 @@ DWORD GetFrameSizeByAddress(PVOID Address, PDWORD OutFrameSize)
 
 extern "C" PVOID NTAPI Spoof(PVOID a, ...);
 
+template<class Ret, typename T1, typename T2, typename T3, typename T4>
+Ret SpoofCall(PVOID func, PPRM params, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
+{
+    return Spoof((PVOID)arg1, (PVOID)arg2, (PVOID)arg3, (PVOID)arg4, (PVOID)params, func, (PVOID)0);
+}
+
+template<typename Ret, typename T1 = PVOID, typename T2 = PVOID, typename T3 = PVOID, typename T4 = PVOID, typename... Args>
+Ret SpoofCall(PVOID func, PPRM params, T1 arg1, T2 arg2, T3 arg3, T4 arg4, Args... args)
+{
+    size_t StackArgsCount = sizeof...(Args);
+    PVOID StackArgs[] = { (PVOID)args... };
+
+    return Spoof((PVOID)arg1, (PVOID)arg2, (PVOID)arg3, (PVOID)arg4, (PVOID)params, func, (PVOID)StackArgsCount, StackArgs);
+}
+
 /* 
           GADGET FINDING
 */
@@ -284,6 +300,7 @@ INT Main()
     DWORD       Status          = NULL;
     DWORD       FrameSize       = NULL;
     PVOID       ReturnAddress   = NULL;
+    PVOID       Alloc           = NULL;
     PRM         Params          = { NULL };
     PRM         OrigParams      = { NULL };
     BYTE        Gadget[2]       = {0xff, 0x23};
@@ -315,13 +332,13 @@ INT Main()
     Params.RtlUserThreadStartFrameSize = FrameSize;
    
     // Test with some calls
-    PVOID Alloc = Spoof(
-        (PVOID)NULL, 
-        (PVOID)1024, 
-        (PVOID)(MEM_COMMIT | MEM_RESERVE),
-        (PVOID)PAGE_READWRITE, 
-            &Params, VirtualAlloc, 1
-    );
+    Alloc = SpoofCall<PVOID>(
+        VirtualAlloc, &Params, 
+            (LPVOID)NULL, 
+            (SIZE_T)1024, 
+            (DWORD)(MEM_COMMIT | MEM_RESERVE), 
+            (DWORD)PAGE_READWRITE);
+
 
     if (!Alloc) { return GetLastError(); }
 
