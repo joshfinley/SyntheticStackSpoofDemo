@@ -8,7 +8,7 @@ typedef struct _FRAME_METADATA {
     LPCWSTR         DllPath;
     PVOID           ReturnAddress;
     DWORD           FunctionOffset;
-    DWORD           TotalStackSize;
+    DWORD           TotalFrameSize;
     DWORD           CountOfCodes;
     BOOL            SetsFramePointer;
     BOOL            PushRbp;
@@ -105,7 +105,7 @@ DWORD GetFrameSize(PRUNTIME_FUNCTION RuntimeFunction, DWORD64 ImageBase, PFRAME_
         switch (UnwindOperation)
         {
         case UWOP_PUSH_NONVOL:
-            FrameMetadata->TotalStackSize += 8; // Push takes 8 bytes
+            FrameMetadata->TotalFrameSize += 8; // Push takes 8 bytes
             if (RBP_OP_INFO == OperationInfo) {                          // Record when RBP is pushed
                 FrameMetadata->PushRbp = TRUE;                           // as this important for UWOP_SET_FPREGS
                 FrameMetadata->CountOfCodes = UnwindInfo->CountOfCodes;  //
@@ -119,7 +119,7 @@ DWORD GetFrameSize(PRUNTIME_FUNCTION RuntimeFunction, DWORD64 ImageBase, PFRAME_
             Index++;
             break;
         case UWOP_ALLOC_SMALL:
-            FrameMetadata->TotalStackSize += ((OperationInfo * 8) + 8);
+            FrameMetadata->TotalFrameSize += ((OperationInfo * 8) + 8);
             break;
         case UWOP_ALLOC_LARGE:
             Index++;
@@ -133,7 +133,7 @@ DWORD GetFrameSize(PRUNTIME_FUNCTION RuntimeFunction, DWORD64 ImageBase, PFRAME_
                 Index++;
                 FrameOffset += (UnwindInfo->UnwindCode[Index].FrameOffset << 16);
             }
-            FrameMetadata->TotalStackSize += FrameOffset;
+            FrameMetadata->TotalFrameSize += FrameOffset;
             break;
         case UWOP_SET_FPREG:
             FrameMetadata->SetsFramePointer = TRUE;
@@ -158,7 +158,7 @@ DWORD GetFrameSize(PRUNTIME_FUNCTION RuntimeFunction, DWORD64 ImageBase, PFRAME_
     }
 
     // 4. Add return address size
-    FrameMetadata->TotalStackSize += 8;
+    FrameMetadata->TotalFrameSize += 8;
 
     return ERROR_SUCCESS;
 }
@@ -186,7 +186,7 @@ DWORD GetFrameSizeByAddress(PVOID Address, PDWORD OutFrameSize)
     }
 
     Status = GetFrameSize(RuntimeFunction, ImageBase, &FrameMetadata);
-    *OutFrameSize = FrameMetadata.TotalStackSize;
+    *OutFrameSize = FrameMetadata.TotalFrameSize;
     return Status;
 }
 
@@ -329,6 +329,7 @@ INT Main()
         Alloc,
         1024,
         MEM_RELEASE,
+        0,
             &Params, VirtualFree, 0
     );
 
