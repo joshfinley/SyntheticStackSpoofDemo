@@ -105,8 +105,8 @@ DWORD GetFrameSize(PRUNTIME_FUNCTION RuntimeFunction, DWORD64 ImageBase, PFRAME_
         switch (UnwindOperation)
         {
         case UWOP_PUSH_NONVOL:
-            FrameMetadata->TotalStackSize += 8; // Op takes 8 bytes
-            if (RBP_OP_INFO == OperationInfo) {                         // Record when RBP is pushed
+            FrameMetadata->TotalStackSize += 8; // Push takes 8 bytes
+            if (RBP_OP_INFO == OperationInfo) {                          // Record when RBP is pushed
                 FrameMetadata->PushRbp = TRUE;                           // as this important for UWOP_SET_FPREGS
                 FrameMetadata->CountOfCodes = UnwindInfo->CountOfCodes;  //
                 FrameMetadata->PushRbpIndex = Index + 1;
@@ -207,7 +207,6 @@ int Memcmp(const void* Buffer1, const void* Buffer2, size_t Size)
 
     return 0;
 }
-
 
 PIMAGE_SECTION_HEADER GetTextSectionHeader(HMODULE hModule) 
 {
@@ -326,4 +325,3 @@ INT Main()
 
     return ERROR_SUCCESS;
 }
-
