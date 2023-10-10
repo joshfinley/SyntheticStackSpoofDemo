@@ -108,6 +108,7 @@ fixup:
     mov r14, [rcx + 70h]
     mov r15, [rcx + 78h]
 
+
     ; Return from Spoof
     jmp rdx
 Spoof endp

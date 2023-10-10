@@ -69,12 +69,12 @@ typedef struct _PRM {
     PVOID           FixupAddress;                       // 0x00 - 0x07
     PVOID           GadgetAddress;                      // 0x08 - 0x0F
     PVOID           OriginalReturnAddress;              // 0x10 - 0x17
-    PVOID           BaseThreadInitFrameSize;            // 0x18 - 0x1F
+    QWORD           BaseThreadInitFrameSize;            // 0x18 - 0x1F
     PVOID           BaseThreadInitReturnAddress;        // 0x20 - 0x27
-    PVOID           RtlUserThreadStartFrameSize;        // 0x28 - 0x2F
+    QWORD           RtlUserThreadStartFrameSize;        // 0x28 - 0x2F
     PVOID           RtlUserThreadStartReturnAddress;    // 0x30 - 0x37
-    PVOID           GadgetFrameSize;                    // 0x38 - 0x3F
-    PVOID           SystemCallNumber;                   // 0x40 - 0x47
+    QWORD           GadgetFrameSize;                    // 0x38 - 0x3F
+    QWORD           SystemCallNumber;                   // 0x40 - 0x47
     NONVOL_REG_CTX  NonvolRegisters;                    // 0x48 - 0x7F
 } PRM, * PPRM;
 #pragma pack(pop) // Restore the original packing
@@ -159,18 +159,21 @@ DWORD GetFrameSize(PRUNTIME_FUNCTION RuntimeFunction, DWORD64 ImageBase, PFRAME_
 
     // 4. Add return address size
     FrameMetadata->TotalStackSize += 8;
+
     return ERROR_SUCCESS;
 }
 
 DWORD GetFrameSizeByAddress(PVOID Address, PDWORD OutFrameSize)
 {
     PRUNTIME_FUNCTION       RuntimeFunction = NULL;
+    DWORD                   Status          = NULL;
     QWORD                   ImageBase       = NULL;
+    DWORD                   FrameSize       = NULL;
     PUNWIND_HISTORY_TABLE   HistoryTable    = NULL;
     FRAME_METADATA          FrameMetadata   = { NULL };
 
     // Sanity check return address
-    if (!Address) return ERROR_INVALID_PARAMETER;
+    if (!Address || !OutFrameSize) return ERROR_INVALID_PARAMETER;
 
     // Locate RUNTIME_FUNCTION entry for the addresse
     RuntimeFunction = RtlLookupFunctionEntry(
@@ -182,7 +185,9 @@ DWORD GetFrameSizeByAddress(PVOID Address, PDWORD OutFrameSize)
         return ERROR_NOT_FOUND;
     }
 
-    return GetFrameSize(RuntimeFunction, ImageBase, &FrameMetadata);
+    Status = GetFrameSize(RuntimeFunction, ImageBase, &FrameMetadata);
+    *OutFrameSize = FrameMetadata.TotalStackSize;
+    return Status;
 }
 
 extern "C" PVOID NTAPI Spoof(PVOID a, ...);
@@ -231,9 +236,15 @@ PIMAGE_SECTION_HEADER GetTextSectionHeader(HMODULE hModule)
     return NULL;
 }
 
-PVOID FindByteSequence(PBYTE Start, SIZE_T Length, PBYTE Sequence, SIZE_T SequenceLength) 
+PVOID FindByteSequence(PBYTE Start, SIZE_T Length, PBYTE Sequence, SIZE_T SequenceLength)
 {
-    if (Sequence == NULL || SequenceLength == 0) {
+    // Additional checks for NULL pointers and valid lengths
+    if (Start == NULL || Sequence == NULL || Length == 0 || SequenceLength == 0) {
+        return NULL;
+    }
+
+    // Ensure that the SequenceLength is not greater than Length
+    if (SequenceLength > Length) {
         return NULL;
     }
 
@@ -261,7 +272,7 @@ PVOID FindGadget(PCSTR InModuleName, PBYTE Gadget, SIZE_T GadgetLength)
     PBYTE ImageBase = (PBYTE)ModBase;
     PBYTE TextSectionAddr = ImageBase + CodeHeader->VirtualAddress;
 
-    return FindByteSequence(TextSectionAddr, CodeHeader->SizeOfRawData, Gadget, 2);
+    return FindByteSequence(TextSectionAddr, CodeHeader->SizeOfRawData, Gadget, GadgetLength);
 }
 
 /*
@@ -287,21 +298,21 @@ INT Main()
     if (Params.GadgetAddress == NULL) { return ERROR_NOT_FOUND; }
     Status = GetFrameSizeByAddress(Params.GadgetAddress, &FrameSize);
     if (Status != ERROR_SUCCESS) { return Status; }
-    Params.GadgetFrameSize = (PVOID)FrameSize;
+    Params.GadgetFrameSize = FrameSize;
 
     // Get frame size and address of BaseThreadInitThunk
     ReturnAddress = (PBYTE)(GetProcAddress(ModKernel32, "BaseThreadInitThunk")) + 0x14;
     Params.BaseThreadInitReturnAddress = ReturnAddress;
     Status = GetFrameSizeByAddress(ReturnAddress, &FrameSize);
     if (Status != ERROR_SUCCESS) { return Status; }
-    Params.BaseThreadInitFrameSize = (PVOID)FrameSize;
+    Params.BaseThreadInitFrameSize = FrameSize;
 
     // Get frame size and address of RtlUserThreadStart
     ReturnAddress = (PBYTE)(GetProcAddress(ModNtdll, "RtlUserThreadStart")) + 0x21;
     Params.RtlUserThreadStartReturnAddress = ReturnAddress;
     Status = GetFrameSizeByAddress(ReturnAddress, &FrameSize);
     if (Status != ERROR_SUCCESS) { return Status; }
-    Params.RtlUserThreadStartFrameSize = (PVOID)FrameSize;
+    Params.RtlUserThreadStartFrameSize = FrameSize;
    
     // Test with some calls
     PVOID Alloc = Spoof(
