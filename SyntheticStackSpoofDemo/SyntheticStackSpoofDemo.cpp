@@ -196,13 +196,13 @@ extern "C" PVOID NTAPI Spoof(PVOID a, ...);
 template<class Ret, typename T1, typename T2, typename T3, typename T4>
 Ret SpoofCall(PVOID func, PPRM params, T1 arg1, T2 arg2, T3 arg3, T4 arg4)
 {
-    return Spoof((PVOID)arg1, (PVOID)arg2, (PVOID)arg3, (PVOID)arg4, (PVOID)params, func, (PVOID)0);
+    return reinterpret_cast<Ret>(Spoof((PVOID)arg1, (PVOID)arg2, (PVOID)arg3, (PVOID)arg4, (PVOID)params, func, (PVOID)0));
 }
 
 template<typename Ret, typename T1 = PVOID, typename T2 = PVOID, typename T3 = PVOID, typename T4 = PVOID, typename... Args>
 Ret SpoofCall(PVOID func, PPRM params, T1 arg1, T2 arg2, T3 arg3, T4 arg4, Args... args)
 {
-    size_t StackArgsCount = sizeof...(Args);
+    SIZE_T StackArgsCount = sizeof...(Args);
     PVOID StackArgs[] = { (PVOID)args... };
 
     return Spoof((PVOID)arg1, (PVOID)arg2, (PVOID)arg3, (PVOID)arg4, (PVOID)params, func, (PVOID)StackArgsCount, StackArgs);
@@ -212,12 +212,12 @@ Ret SpoofCall(PVOID func, PPRM params, T1 arg1, T2 arg2, T3 arg3, T4 arg4, Args.
           GADGET FINDING
 */
 
-int Memcmp(const void* Buffer1, const void* Buffer2, size_t Size)
+INT Memcmp(CONST PVOID Buffer1, CONST PVOID Buffer2, SIZE_T Size)
 {
-    const unsigned char* p1 = (const unsigned char*)Buffer1;
-    const unsigned char* p2 = (const unsigned char*)Buffer2;
+    CONST PBYTE p1 = (CONST PBYTE)Buffer1;
+    CONST PBYTE p2 = (CONST PBYTE)Buffer2;
 
-    for (size_t i = 0; i < Size; i++) {
+    for (SIZE_T i = 0; i < Size; i++) {
         if (p1[i] < p2[i]) {
             return -1;
         }
@@ -244,7 +244,7 @@ PIMAGE_SECTION_HEADER GetTextSectionHeader(HMODULE hModule)
 
     PIMAGE_SECTION_HEADER Section = IMAGE_FIRST_SECTION(NtHeaders);
     for (WORD i = 0; i < NtHeaders->FileHeader.NumberOfSections; ++i, ++Section) {
-        if (Memcmp(Section->Name, ".text", 5) == 0) {
+        if (Memcmp((CONST PVOID)Section->Name, (CONST PVOID)".text", 5) == 0) {
             return Section;
         }
     }
@@ -254,12 +254,10 @@ PIMAGE_SECTION_HEADER GetTextSectionHeader(HMODULE hModule)
 
 PVOID FindByteSequence(PBYTE Start, SIZE_T Length, PBYTE Sequence, SIZE_T SequenceLength)
 {
-    // Additional checks for NULL pointers and valid lengths
     if (Start == NULL || Sequence == NULL || Length == 0 || SequenceLength == 0) {
         return NULL;
     }
 
-    // Ensure that the SequenceLength is not greater than Length
     if (SequenceLength > Length) {
         return NULL;
     }
@@ -291,6 +289,35 @@ PVOID FindGadget(PCSTR InModuleName, PBYTE Gadget, SIZE_T GadgetLength)
     return FindByteSequence(TextSectionAddr, CodeHeader->SizeOfRawData, Gadget, GadgetLength);
 }
 
+PVOID FindCallSite(CONST PBYTE Proc, SIZE_T ProcLength, INT CallIndex)
+{
+    BYTE Sig[2] = { 0xFF, 0x15 };
+
+    SIZE_T LastPos = 0;
+    for (INT Idx = 0; Idx < CallIndex; )
+    {
+        PVOID Match = FindByteSequence(Proc + LastPos, ProcLength - LastPos, Sig, 2);
+        if (!Match)
+        {
+            // End the search if no match is found
+            return NULL;
+        }
+
+        // Move LastPos ahead
+        LastPos = ((PBYTE)Match - Proc) + 2;
+
+        // Increment the index
+        Idx++;
+
+        if (Idx == CallIndex)
+        {
+            return (PVOID)((PBYTE)Match + 6);
+        }
+    }
+
+    return NULL;
+}
+
 /*
             ENTRYPOINT
 */
@@ -318,14 +345,16 @@ INT Main()
     Params.GadgetFrameSize = FrameSize;
 
     // Get frame size and address of BaseThreadInitThunk
-    ReturnAddress = (PBYTE)(GetProcAddress(ModKernel32, "BaseThreadInitThunk")) + 0x14;
+    ReturnAddress = (PBYTE)(GetProcAddress(ModKernel32, "BaseThreadInitThunk")); // +0x14;
+    ReturnAddress = FindCallSite((CONST PBYTE)ReturnAddress, 0xFF, 1);
     Params.BaseThreadInitReturnAddress = ReturnAddress;
     Status = GetFrameSizeByAddress(ReturnAddress, &FrameSize);
     if (Status != ERROR_SUCCESS) { return Status; }
     Params.BaseThreadInitFrameSize = FrameSize;
 
     // Get frame size and address of RtlUserThreadStart
-    ReturnAddress = (PBYTE)(GetProcAddress(ModNtdll, "RtlUserThreadStart")) + 0x21;
+    ReturnAddress = (PBYTE)(GetProcAddress(ModNtdll, "RtlUserThreadStart")); // +0x21;
+    ReturnAddress = FindCallSite((CONST PBYTE)ReturnAddress, 0xFF, 1);
     Params.RtlUserThreadStartReturnAddress = ReturnAddress;
     Status = GetFrameSizeByAddress(ReturnAddress, &FrameSize);
     if (Status != ERROR_SUCCESS) { return Status; }
@@ -342,12 +371,12 @@ INT Main()
 
     if (!Alloc) { return GetLastError(); }
 
-    BOOL FreeOK = (BOOL)Spoof(
+    BOOL FreeOK = SpoofCall<BOOL>(
+        VirtualFree, &Params,
         Alloc,
-        1024,
+        NULL,
         MEM_RELEASE,
-        0,
-            &Params, VirtualFree, 0
+        NULL
     );
 
     if (!FreeOK) { return GetLastError(); }
