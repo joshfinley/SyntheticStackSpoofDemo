@@ -5,8 +5,8 @@ NtWait proto
 
 Spoof proc
     pop     rax             ; Real return address
-    mov     r10, rdi        ; Original r10 in rdi
-    mov     r11, rsi        ; Original r11 in rs
+    mov     r10, rdi        ; Original rdi in r10
+    mov     r11, rsi        ; Original rsi in r11
     mov     rdi, [rsp + 20h] ; Rdi = &Params
     mov     rsi, [rsp + 28h] ; Rsi = target function
     
